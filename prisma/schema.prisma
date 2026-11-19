@@ -1,0 +1,232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Pengguna {
+  id                       Int                  @id @default(autoincrement())
+  nama                     String
+  email                    String               @unique
+  sandi                    String
+  peran                    String               // Admin | Staf
+  aktif                    Boolean              @default(true)
+  tokenVersion             Int                  @default(0)
+  transaksi                Transaksi[]
+  mutasi                   Mutasi[]
+  shifts                   Shift[]
+  pengeluaran              Pengeluaran[]        @relation("PetugasPengeluaran")
+  pembelianDibuat          Pembelian[]          @relation("PembelianPembuat")
+  pembayaranSupplierDibuat PembayaranSupplier[] @relation("PembayaranSupplierPembuat")
+}
+
+model Supplier {
+  id        Int        @id @default(autoincrement())
+  nama      String
+  telepon   String?
+  email     String?
+  alamat    String?
+  catatan   String?
+  batch     Batch[]
+  pembelian Pembelian[]
+}
+
+model Obat {
+  id           Int             @id @default(autoincrement())
+  kode         String          @unique
+  nama         String
+  kategori     String
+  satuan       String
+  hargaBeli    Int
+  hargaJual    Int
+  minimum      Int
+  batch        Batch[]
+  item         ItemTransaksi[]
+  itemPembelian PembelianItem[]
+
+  @@index([nama])
+  @@index([kategori])
+}
+
+model Batch {
+  id          Int             @id @default(autoincrement())
+  obatId      Int
+  obat        Obat            @relation(fields: [obatId], references: [id], onDelete: Restrict)
+  kodeBatch   String
+  kedaluwarsa DateTime
+  stok        Int
+  // Harga beli unit persediaan batch. Nullable untuk data lama yang belum diketahui.
+  hargaBeli   Int?
+  supplierId  Int?
+  supplier    Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  item        ItemTransaksi[]
+  mutasi      Mutasi[]
+  itemPembelian PembelianItem[]
+
+  @@unique([obatId, kodeBatch])
+  @@index([obatId, kedaluwarsa, stok])
+  @@index([supplierId])
+}
+
+model Transaksi {
+  id        Int             @id @default(autoincrement())
+  kode      String          @unique
+  waktu     DateTime        @default(now())
+  kasirId   Int
+  kasir     Pengguna        @relation(fields: [kasirId], references: [id], onDelete: Restrict)
+  diskon    Int
+  total     Int
+  metode    String          @default("Tunai")
+  // NULL untuk transaksi yang dibuat sebelum kolom pembayaran ditambahkan.
+  dibayar   Int?
+  kembalian Int?
+  shiftId   Int?
+  shift     Shift?          @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  item      ItemTransaksi[]
+
+  @@index([waktu])
+  @@index([kasirId, waktu])
+  @@index([shiftId, waktu])
+}
+
+model ItemTransaksi {
+  id          Int       @id @default(autoincrement())
+  transaksiId Int
+  transaksi   Transaksi @relation(fields: [transaksiId], references: [id], onDelete: Cascade)
+  obatId      Int
+  obat        Obat      @relation(fields: [obatId], references: [id], onDelete: Restrict)
+  batchId     Int
+  batch       Batch     @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  jumlah      Int
+  harga       Int
+  // Snapshot harga pokok per unit dari batch ketika transaksi terjadi.
+  hargaPokok  Int?
+
+  @@index([transaksiId])
+  @@index([obatId])
+  @@index([batchId])
+}
+
+// Jejak semua perubahan stok. Mutasi historis tidak boleh dihapus.
+model Mutasi {
+  id         Int      @id @default(autoincrement())
+  waktu      DateTime @default(now())
+  batchId    Int
+  batch      Batch    @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  jenis      String   // Penjualan | Pembelian | Penyesuaian | Retur
+  jumlah     Int      // negatif = stok keluar
+  referensi  String
+  catatan    String?
+  petugasId  Int
+  petugas    Pengguna @relation(fields: [petugasId], references: [id], onDelete: Restrict)
+
+  @@index([waktu])
+  @@index([batchId, waktu])
+}
+
+model Shift {
+  id          Int                  @id @default(autoincrement())
+  penggunaId  Int
+  pengguna    Pengguna             @relation(fields: [penggunaId], references: [id], onDelete: Restrict)
+  bukaPada    DateTime             @default(now())
+  tutupPada   DateTime?
+  // Hanya shift yang sedang buka memiliki nilai kunciAktif.
+  // Unique nullable mencegah satu pengguna membuka dua shift sekaligus.
+  kunciAktif  String?              @unique
+  kasAwal     Int
+  kasHarus    Int?
+  kasAkhir    Int?
+  selisihKas  Int?
+  catatanBuka String?
+  catatanTutup String?
+  transaksi   Transaksi[]
+  pengeluaran Pengeluaran[]
+  pembayaranSupplier PembayaranSupplier[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([penggunaId, tutupPada])
+  @@index([bukaPada])
+}
+
+model Pembelian {
+  id            Int                  @id @default(autoincrement())
+  kode          String               @unique
+  supplierId    Int
+  supplier      Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  nomorInvoice  String?
+  tanggal       DateTime             @default(now())
+  jatuhTempo    DateTime?
+  total         Int
+  terbayar      Int                  @default(0)
+  status        String               @default("Belum Lunas") // Belum Lunas | Parsial | Lunas
+  catatan       String?
+  pembuatId     Int
+  pembuat       Pengguna             @relation("PembelianPembuat", fields: [pembuatId], references: [id], onDelete: Restrict)
+  item          PembelianItem[]
+  pembayaran   PembayaranSupplier[]
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([supplierId, status, jatuhTempo])
+  @@index([tanggal])
+}
+
+model PembelianItem {
+  id          Int       @id @default(autoincrement())
+  pembelianId Int
+  pembelian   Pembelian @relation(fields: [pembelianId], references: [id], onDelete: Restrict)
+  obatId      Int
+  obat        Obat      @relation(fields: [obatId], references: [id], onDelete: Restrict)
+  batchId     Int
+  batch       Batch     @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  jumlah      Int
+  hargaBeli   Int
+  subtotal    Int
+
+  @@index([pembelianId])
+  @@index([obatId])
+  @@index([batchId])
+}
+
+model PembayaranSupplier {
+  id        Int      @id @default(autoincrement())
+  pembelianId Int
+  pembelian Pembelian @relation(fields: [pembelianId], references: [id], onDelete: Restrict)
+  shiftId   Int?
+  shift     Shift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  petugasId Int
+  petugas   Pengguna @relation("PembayaranSupplierPembuat", fields: [petugasId], references: [id], onDelete: Restrict)
+  waktu     DateTime @default(now())
+  jumlah    Int
+  metode    String   @default("Tunai") // Tunai | Transfer | QRIS
+  catatan   String?
+
+  @@index([pembelianId, waktu])
+  @@index([shiftId, waktu])
+}
+
+model Pengeluaran {
+  id        Int      @id @default(autoincrement())
+  shiftId   Int
+  shift     Shift    @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  petugasId Int
+  petugas   Pengguna @relation("PetugasPengeluaran", fields: [petugasId], references: [id], onDelete: Restrict)
+  nama      String
+  kategori  String
+  jumlah    Int
+  waktu     DateTime @default(now())
+  catatan   String?
+
+  @@index([waktu])
+  @@index([shiftId, waktu])
+}
+
+// Pengaturan apotek menggunakan kunci-nilai agar kompatibel dengan frontend saat ini.
+model Pengaturan {
+  kunci String @id
+  nilai String
+}

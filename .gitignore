@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+build/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# SQLite databases and backups
+prisma/*.db*
+prisma/*.sqlite*
+*.db
+*.sqlite
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Deployment
+.vercel/
+*.tsbuildinfo
+
+# SQLite databases and backups
+prisma/*.db*
+prisma/*.sqlite*
